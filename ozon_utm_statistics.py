@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Download Ozon external traffic analytics by UTM tags."""
+"""Load Ozon external traffic analytics by UTM tags into a DataFrame."""
 
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
 import sys
@@ -11,9 +12,11 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
+
+import pandas as pd
 
 
 API_BASE_URL = "https://api-performance.ozon.ru"
@@ -30,6 +33,14 @@ class OzonApiError(RuntimeError):
 class OzonCredentials:
     client_id: str
     client_secret: str
+
+
+@dataclass(frozen=True)
+class ReportContent:
+    data: bytes
+    content_type: str
+    filename: str
+    url: str
 
 
 def request_json(
@@ -136,26 +147,21 @@ def wait_report(
         time.sleep(poll_interval)
 
 
-def choose_output_path(output: Path, response: urllib.response.addinfourl, url: str) -> Path:
-    if output.suffix:
-        return output
-
-    filename = ""
+def extract_filename(response: urllib.response.addinfourl, url: str) -> str:
     disposition = response.headers.get("Content-Disposition", "")
     for chunk in disposition.split(";"):
         key, _, value = chunk.strip().partition("=")
-        if key.lower() == "filename":
-            filename = value.strip("\"'")
-            break
+        key = key.lower()
+        if key == "filename*":
+            _, _, encoded_filename = value.strip("\"'").partition("''")
+            return urllib.parse.unquote(encoded_filename or value)
+        if key == "filename":
+            return value.strip("\"'")
 
-    if not filename:
-        path_name = Path(urllib.parse.urlparse(url).path).name
-        filename = path_name or "ozon_utm_statistics_report"
-
-    return output / filename
+    return urllib.parse.urlparse(url).path.rsplit("/", 1)[-1]
 
 
-def download_report(token: str, base_url: str, link: str, output: Path, timeout: int = 120) -> Path:
+def fetch_report_content(token: str, base_url: str, link: str, timeout: int = 120) -> ReportContent:
     url = urllib.parse.urljoin(f"{base_url}/", link)
     url_host = urllib.parse.urlparse(url).netloc
     api_host = urllib.parse.urlparse(base_url).netloc
@@ -171,16 +177,88 @@ def download_report(token: str, base_url: str, link: str, output: Path, timeout:
 
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            output_path = choose_output_path(output, response, url)
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_bytes(response.read())
+            return ReportContent(
+                data=response.read(),
+                content_type=response.headers.get("Content-Type", ""),
+                filename=extract_filename(response, url),
+                url=url,
+            )
     except urllib.error.HTTPError as error:
         details = error.read().decode("utf-8", errors="replace")
-        raise OzonApiError(f"Download failed: HTTP {error.code}: {details}") from error
+        raise OzonApiError(f"Report fetch failed: HTTP {error.code}: {details}") from error
     except urllib.error.URLError as error:
-        raise OzonApiError(f"Download failed: {error.reason}") from error
+        raise OzonApiError(f"Report fetch failed: {error.reason}") from error
 
-    return output_path
+
+def decode_csv_text(data: bytes) -> str:
+    for encoding in ("utf-8-sig", "utf-8", "cp1251"):
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    raise OzonApiError("Report CSV encoding is not supported")
+
+
+def detect_csv_layout(text: str) -> tuple[str, int]:
+    lines = text.splitlines()
+    candidates: list[tuple[int, str, int, str]] = []
+
+    for index, line in enumerate(lines[:50]):
+        counts = [(line.count(separator), separator) for separator in (";", ",", "\t")]
+        count, separator = max(counts, key=lambda item: item[0])
+        if count > 0:
+            candidates.append((count, separator, index, line))
+
+    if not candidates:
+        return ",", 0
+
+    max_count = max(count for count, _, _, _ in candidates)
+    best_candidates = [candidate for candidate in candidates if candidate[0] == max_count]
+
+    for _, separator, index, line in best_candidates:
+        if not line.lstrip().startswith(separator):
+            return separator, index
+
+    _, separator, index, _ = best_candidates[0]
+    return separator, index
+
+
+def csv_bytes_to_dataframe(data: bytes) -> pd.DataFrame:
+    text = decode_csv_text(data)
+    separator, header_row = detect_csv_layout(text)
+    dataframe = pd.read_csv(
+        io.StringIO(text),
+        sep=separator,
+        skiprows=header_row,
+        engine="python",
+    )
+    return dataframe.dropna(axis=1, how="all")
+
+
+def zip_bytes_to_dataframe(data: bytes) -> pd.DataFrame:
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        names = [name for name in archive.namelist() if not name.endswith("/")]
+        for name in names:
+            if name.lower().endswith((".csv", ".txt")):
+                return csv_bytes_to_dataframe(archive.read(name))
+        for name in names:
+            if name.lower().endswith((".xlsx", ".xlsm", ".xls")):
+                return pd.read_excel(io.BytesIO(archive.read(name)))
+
+    raise OzonApiError("Report archive does not contain CSV or Excel files")
+
+
+def report_content_to_dataframe(report: ReportContent) -> pd.DataFrame:
+    filename = report.filename.lower()
+    content_type = report.content_type.lower()
+
+    if filename.endswith((".xlsx", ".xlsm", ".xls")) or "excel" in content_type or "spreadsheet" in content_type:
+        return pd.read_excel(io.BytesIO(report.data))
+
+    if zipfile.is_zipfile(io.BytesIO(report.data)):
+        return zip_bytes_to_dataframe(report.data)
+
+    return csv_bytes_to_dataframe(report.data)
 
 
 def read_credentials() -> OzonCredentials:
@@ -237,19 +315,18 @@ class OzonUtmStatisticsClient:
             timeout_seconds=timeout_seconds,
         )
 
-    def download_report(self, link: str, output: str | Path = "reports") -> Path:
-        return download_report(self.token, self.base_url, link, Path(output))
+    def fetch_report_content(self, link: str) -> ReportContent:
+        return fetch_report_content(self.token, self.base_url, link)
 
-    def download_utm_statistics(
+    def get_utm_statistics(
         self,
         date_from: str,
         date_to: str,
         *,
-        output: str | Path = "reports",
         uuid: str | None = None,
         poll_interval: int = 10,
         timeout_seconds: int = 1800,
-    ) -> Path:
+    ) -> pd.DataFrame:
         report_uuid = uuid or self.submit_report(date_from, date_to)
         status = self.wait_report(
             report_uuid,
@@ -261,28 +338,24 @@ class OzonUtmStatisticsClient:
         if not isinstance(link, str) or not link:
             raise OzonApiError(f"Ready report does not contain download link: {status}")
 
-        return self.download_report(link, output)
+        report = self.fetch_report_content(link)
+        return report_content_to_dataframe(report)
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Generate and download Ozon UTM/external traffic analytics report.",
+        description="Generate Ozon UTM/external traffic analytics report and print it as a DataFrame.",
     )
     parser.add_argument("--date-from", required=True, help="Start date in YYYY-MM-DD format")
     parser.add_argument("--date-to", required=True, help="End date in YYYY-MM-DD format")
     parser.add_argument(
-        "--output",
-        default="reports",
-        type=Path,
-        help="Output file or directory. Default: reports",
-    )
-    parser.add_argument(
         "--uuid",
-        help="Existing report UUID. If passed, the script skips report creation and only waits/downloads.",
+        help="Existing report UUID. If passed, the script skips report creation.",
     )
     parser.add_argument("--base-url", default=API_BASE_URL, help=f"API base URL. Default: {API_BASE_URL}")
     parser.add_argument("--poll-interval", default=10, type=int, help="Polling interval in seconds")
     parser.add_argument("--timeout", default=1800, type=int, help="Report generation timeout in seconds")
+    parser.add_argument("--csv", action="store_true", help="Print full DataFrame as CSV instead of table preview")
     return parser
 
 
@@ -294,18 +367,18 @@ def main() -> int:
     uuid = args.uuid or client.submit_report(args.date_from, args.date_to)
     print(f"Report UUID: {uuid}", file=sys.stderr)
 
-    status = client.wait_report(
-        uuid,
+    dataframe = client.get_utm_statistics(
+        args.date_from,
+        args.date_to,
+        uuid=uuid,
         poll_interval=args.poll_interval,
         timeout_seconds=args.timeout,
     )
 
-    link = status.get("link")
-    if not isinstance(link, str) or not link:
-        raise OzonApiError(f"Ready report does not contain download link: {status}")
-
-    output_path = client.download_report(link, args.output)
-    print(output_path)
+    if args.csv:
+        print(dataframe.to_csv(index=False))
+    else:
+        print(dataframe)
     return 0
 
 
