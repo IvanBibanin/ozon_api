@@ -22,6 +22,12 @@ export OZON_PERFORMANCE_CLIENT_SECRET="..."
 %pip install -e .
 ```
 
+Если пакет уже был установлен раньше, обновите его принудительно:
+
+```python
+%pip install --force-reinstall --no-cache-dir git+https://github.com/IvanBibanin/ozon_api.git
+```
+
 В следующей ячейке укажите ключи и скачайте отчёт:
 
 ```python
