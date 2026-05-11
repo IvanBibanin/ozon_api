@@ -18,6 +18,13 @@ export OZON_PERFORMANCE_CLIENT_SECRET="..."
 python3 ozon_utm_statistics.py --date-from 2026-05-01 --date-to 2026-05-10
 ```
 
+Можно установить проект как локальную CLI-команду:
+
+```bash
+python3 -m pip install -e .
+ozon-utm-statistics --date-from 2026-05-01 --date-to 2026-05-10
+```
+
 По умолчанию файл сохранится в папку `reports`. Можно указать файл или папку:
 
 ```bash
