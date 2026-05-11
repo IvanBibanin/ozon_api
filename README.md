@@ -23,13 +23,12 @@
 В следующей ячейке укажите ключи и получите отчёт как датафрейм:
 
 ```python
-from ozon_utm_statistics import OzonCredentials, OzonUtmStatisticsClient
+from ozon_utm_statistics import OzonUtmStatisticsClient
 
-credentials = OzonCredentials(
+client = OzonUtmStatisticsClient(
     client_id="ваш_client_id",
     client_secret="ваш_client_secret",
 )
-client = OzonUtmStatisticsClient(credentials)
 
 df = client.get_utm_statistics(
     date_from="2026-05-01",

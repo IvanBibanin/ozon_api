@@ -1,7 +1,4 @@
-#!/usr/bin/env python3
 """Load Ozon external traffic analytics by UTM tags into a DataFrame."""
-
-from __future__ import annotations
 
 import io
 import json
@@ -9,7 +6,6 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
 from typing import Any
 
 import pandas as pd
@@ -24,12 +20,6 @@ REPORT_TYPE = "TRAFFIC_SOURCES"
 
 class OzonApiError(RuntimeError):
     """Raised when Ozon Performance API returns an error response."""
-
-
-@dataclass(frozen=True)
-class OzonCredentials:
-    client_id: str
-    client_secret: str
 
 
 def request_json(
@@ -70,137 +60,107 @@ def request_json(
         raise OzonApiError(f"{method} {url} returned non-JSON response") from error
 
 
-def get_access_token(credentials: OzonCredentials, base_url: str) -> str:
-    response = request_json(
-        "POST",
-        f"{base_url}{TOKEN_PATH}",
-        payload={
-            "client_id": credentials.client_id,
-            "client_secret": credentials.client_secret,
-            "grant_type": "client_credentials",
-        },
-    )
-    token = response.get("access_token")
-    if not isinstance(token, str) or not token:
-        raise OzonApiError(f"Token response does not contain access_token: {response}")
-    return token
-
-
-def submit_report(token: str, base_url: str, date_from: str, date_to: str) -> str:
-    response = request_json(
-        "POST",
-        f"{base_url}{REPORT_PATH}",
-        token=token,
-        payload={
-            "dateFrom": date_from,
-            "dateTo": date_to,
-            "type": REPORT_TYPE,
-        },
-    )
-    uuid = response.get("UUID") or response.get("uuid")
-    if not isinstance(uuid, str) or not uuid:
-        raise OzonApiError(f"Report submit response does not contain UUID: {response}")
-    return uuid
-
-
-def get_report_status(token: str, base_url: str, uuid: str) -> dict[str, Any]:
-    quoted_uuid = urllib.parse.quote(uuid, safe="")
-    return request_json("GET", f"{base_url}{REPORT_PATH}/{quoted_uuid}", token=token)
-
-
-def wait_report(
-    token: str,
-    base_url: str,
-    uuid: str,
-    *,
-    poll_interval: int,
-    timeout_seconds: int,
-) -> dict[str, Any]:
-    deadline = time.monotonic() + timeout_seconds
-
-    while True:
-        status = get_report_status(token, base_url, uuid)
-        state = str(status.get("state", "")).upper()
-
-        if state in {"OK", "DONE", "SUCCESS", "COMPLETED"}:
-            return status
-
-        if state in {"ERROR", "FAILED", "FAIL"}:
-            error = status.get("error") or status
-            raise OzonApiError(f"Report generation failed: {error}")
-
-        if time.monotonic() >= deadline:
-            raise TimeoutError(f"Report {uuid} was not ready after {timeout_seconds} seconds")
-
-        time.sleep(poll_interval)
-
-
-def fetch_report_content(token: str, base_url: str, link: str, timeout: int = 120) -> bytes:
-    url = urllib.parse.urljoin(f"{base_url}/", link)
-    url_host = urllib.parse.urlparse(url).netloc
-    api_host = urllib.parse.urlparse(base_url).netloc
-    headers = {"Accept": "*/*"}
-    if url_host == api_host:
-        headers["Authorization"] = f"Bearer {token}"
-
-    request = urllib.request.Request(
-        url,
-        headers=headers,
-        method="GET",
-    )
-
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return response.read()
-    except urllib.error.HTTPError as error:
-        details = error.read().decode("utf-8", errors="replace")
-        raise OzonApiError(f"Report fetch failed: HTTP {error.code}: {details}") from error
-    except urllib.error.URLError as error:
-        raise OzonApiError(f"Report fetch failed: {error.reason}") from error
-
-
-def report_content_to_dataframe(report: bytes) -> pd.DataFrame:
-    try:
-        return pd.read_csv(io.BytesIO(report), sep=";", encoding="utf-8-sig")
-    except UnicodeDecodeError:
-        return pd.read_csv(io.BytesIO(report), sep=";", encoding="cp1251")
-
-
 class OzonUtmStatisticsClient:
-    def __init__(self, credentials: OzonCredentials, base_url: str = API_BASE_URL) -> None:
-        self.credentials = credentials
+    def __init__(self, client_id: str, client_secret: str, base_url: str = API_BASE_URL) -> None:
+        self.client_id = client_id
+        self.client_secret = client_secret
         self.base_url = base_url
         self._token: str | None = None
 
     @property
     def token(self) -> str:
         if self._token is None:
-            self._token = get_access_token(self.credentials, self.base_url)
+            self._token = self._get_access_token()
         return self._token
 
-    def submit_report(self, date_from: str, date_to: str) -> str:
-        return submit_report(self.token, self.base_url, date_from, date_to)
+    def _get_access_token(self) -> str:
+        response = request_json(
+            "POST",
+            f"{self.base_url}{TOKEN_PATH}",
+            payload={
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+                "grant_type": "client_credentials",
+            },
+        )
+        token = response.get("access_token")
+        if not isinstance(token, str) or not token:
+            raise OzonApiError(f"Token response does not contain access_token: {response}")
+        return token
 
-    def get_report_status(self, uuid: str) -> dict[str, Any]:
-        return get_report_status(self.token, self.base_url, uuid)
+    def _submit_report(self, date_from: str, date_to: str) -> str:
+        response = request_json(
+            "POST",
+            f"{self.base_url}{REPORT_PATH}",
+            token=self.token,
+            payload={
+                "dateFrom": date_from,
+                "dateTo": date_to,
+                "type": REPORT_TYPE,
+            },
+        )
+        uuid = response.get("UUID") or response.get("uuid")
+        if not isinstance(uuid, str) or not uuid:
+            raise OzonApiError(f"Report submit response does not contain UUID: {response}")
+        return uuid
 
-    def wait_report(
+    def _get_report_status(self, uuid: str) -> dict[str, Any]:
+        quoted_uuid = urllib.parse.quote(uuid, safe="")
+        return request_json("GET", f"{self.base_url}{REPORT_PATH}/{quoted_uuid}", token=self.token)
+
+    def _wait_report(
         self,
         uuid: str,
         *,
         poll_interval: int = 10,
         timeout_seconds: int = 1800,
     ) -> dict[str, Any]:
-        return wait_report(
-            self.token,
-            self.base_url,
-            uuid,
-            poll_interval=poll_interval,
-            timeout_seconds=timeout_seconds,
+        deadline = time.monotonic() + timeout_seconds
+
+        while True:
+            status = self._get_report_status(uuid)
+            state = str(status.get("state", "")).upper()
+
+            if state in {"OK", "DONE", "SUCCESS", "COMPLETED"}:
+                return status
+
+            if state in {"ERROR", "FAILED", "FAIL"}:
+                error = status.get("error") or status
+                raise OzonApiError(f"Report generation failed: {error}")
+
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"Report {uuid} was not ready after {timeout_seconds} seconds")
+
+            time.sleep(poll_interval)
+
+    def _fetch_report_content(self, link: str, timeout: int = 120) -> bytes:
+        url = urllib.parse.urljoin(f"{self.base_url}/", link)
+        url_host = urllib.parse.urlparse(url).netloc
+        api_host = urllib.parse.urlparse(self.base_url).netloc
+        headers = {"Accept": "*/*"}
+        if url_host == api_host:
+            headers["Authorization"] = f"Bearer {self.token}"
+
+        request = urllib.request.Request(
+            url,
+            headers=headers,
+            method="GET",
         )
 
-    def fetch_report_content(self, link: str) -> bytes:
-        return fetch_report_content(self.token, self.base_url, link)
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return response.read()
+        except urllib.error.HTTPError as error:
+            details = error.read().decode("utf-8", errors="replace")
+            raise OzonApiError(f"Report fetch failed: HTTP {error.code}: {details}") from error
+        except urllib.error.URLError as error:
+            raise OzonApiError(f"Report fetch failed: {error.reason}") from error
+
+    def _report_content_to_dataframe(self, report: bytes) -> pd.DataFrame:
+        try:
+            return pd.read_csv(io.BytesIO(report), sep=";", encoding="utf-8-sig")
+        except UnicodeDecodeError:
+            return pd.read_csv(io.BytesIO(report), sep=";", encoding="cp1251")
 
     def get_utm_statistics(
         self,
@@ -211,8 +171,8 @@ class OzonUtmStatisticsClient:
         poll_interval: int = 10,
         timeout_seconds: int = 1800,
     ) -> pd.DataFrame:
-        report_uuid = uuid or self.submit_report(date_from, date_to)
-        status = self.wait_report(
+        report_uuid = uuid or self._submit_report(date_from, date_to)
+        status = self._wait_report(
             report_uuid,
             poll_interval=poll_interval,
             timeout_seconds=timeout_seconds,
@@ -222,8 +182,8 @@ class OzonUtmStatisticsClient:
         if not isinstance(link, str) or not link:
             raise OzonApiError(f"Ready report does not contain download link: {status}")
 
-        report = self.fetch_report_content(link)
-        return report_content_to_dataframe(report)
+        report = self._fetch_report_content(link)
+        return self._report_content_to_dataframe(report)
 
 
 class to_postgresql():
