@@ -14,6 +14,47 @@ export OZON_PERFORMANCE_CLIENT_SECRET="..."
 
 ## Запуск
 
+### В Jupyter Notebook
+
+Сначала установите проект из папки репозитория:
+
+```python
+%pip install -e .
+```
+
+В следующей ячейке укажите ключи и скачайте отчёт:
+
+```python
+from ozon_utm_statistics import OzonCredentials, OzonUtmStatisticsClient
+
+credentials = OzonCredentials(
+    client_id="ваш_client_id",
+    client_secret="ваш_client_secret",
+)
+client = OzonUtmStatisticsClient(credentials)
+
+file_path = client.download_utm_statistics(
+    date_from="2026-05-01",
+    date_to="2026-05-10",
+    output="reports/utm_2026-05-01_2026-05-10.csv",
+)
+
+file_path
+```
+
+Если отчёт уже создан и есть UUID:
+
+```python
+file_path = client.download_utm_statistics(
+    date_from="2026-05-01",
+    date_to="2026-05-10",
+    uuid="0c159c60-ab92-46d9-9a6b-d225dbf5c7b1",
+    output="reports",
+)
+```
+
+### Из консоли
+
 ```bash
 python3 ozon_utm_statistics.py --date-from 2026-05-01 --date-to 2026-05-10
 ```

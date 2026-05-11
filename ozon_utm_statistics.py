@@ -200,6 +200,70 @@ def read_credentials() -> OzonCredentials:
     return OzonCredentials(client_id=client_id, client_secret=client_secret)
 
 
+class OzonUtmStatisticsClient:
+    def __init__(self, credentials: OzonCredentials, base_url: str = API_BASE_URL) -> None:
+        self.credentials = credentials
+        self.base_url = base_url
+        self._token: str | None = None
+
+    @classmethod
+    def from_env(cls, base_url: str = API_BASE_URL) -> "OzonUtmStatisticsClient":
+        return cls(read_credentials(), base_url=base_url)
+
+    @property
+    def token(self) -> str:
+        if self._token is None:
+            self._token = get_access_token(self.credentials, self.base_url)
+        return self._token
+
+    def submit_report(self, date_from: str, date_to: str) -> str:
+        return submit_report(self.token, self.base_url, date_from, date_to)
+
+    def get_report_status(self, uuid: str) -> dict[str, Any]:
+        return get_report_status(self.token, self.base_url, uuid)
+
+    def wait_report(
+        self,
+        uuid: str,
+        *,
+        poll_interval: int = 10,
+        timeout_seconds: int = 1800,
+    ) -> dict[str, Any]:
+        return wait_report(
+            self.token,
+            self.base_url,
+            uuid,
+            poll_interval=poll_interval,
+            timeout_seconds=timeout_seconds,
+        )
+
+    def download_report(self, link: str, output: str | Path = "reports") -> Path:
+        return download_report(self.token, self.base_url, link, Path(output))
+
+    def download_utm_statistics(
+        self,
+        date_from: str,
+        date_to: str,
+        *,
+        output: str | Path = "reports",
+        uuid: str | None = None,
+        poll_interval: int = 10,
+        timeout_seconds: int = 1800,
+    ) -> Path:
+        report_uuid = uuid or self.submit_report(date_from, date_to)
+        status = self.wait_report(
+            report_uuid,
+            poll_interval=poll_interval,
+            timeout_seconds=timeout_seconds,
+        )
+
+        link = status.get("link")
+        if not isinstance(link, str) or not link:
+            raise OzonApiError(f"Ready report does not contain download link: {status}")
+
+        return self.download_report(link, output)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Generate and download Ozon UTM/external traffic analytics report.",
@@ -226,13 +290,11 @@ def main() -> int:
     args = build_parser().parse_args()
     credentials = read_credentials()
 
-    token = get_access_token(credentials, args.base_url)
-    uuid = args.uuid or submit_report(token, args.base_url, args.date_from, args.date_to)
+    client = OzonUtmStatisticsClient(credentials, base_url=args.base_url)
+    uuid = args.uuid or client.submit_report(args.date_from, args.date_to)
     print(f"Report UUID: {uuid}", file=sys.stderr)
 
-    status = wait_report(
-        token,
-        args.base_url,
+    status = client.wait_report(
         uuid,
         poll_interval=args.poll_interval,
         timeout_seconds=args.timeout,
@@ -242,7 +304,7 @@ def main() -> int:
     if not isinstance(link, str) or not link:
         raise OzonApiError(f"Ready report does not contain download link: {status}")
 
-    output_path = download_report(token, args.base_url, link, args.output)
+    output_path = client.download_report(link, args.output)
     print(output_path)
     return 0
 
