@@ -5,12 +5,10 @@ from __future__ import annotations
 
 import io
 import json
-import os
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-import zipfile
 from dataclasses import dataclass
 from typing import Any
 
@@ -188,92 +186,11 @@ def fetch_report_content(token: str, base_url: str, link: str, timeout: int = 12
         raise OzonApiError(f"Report fetch failed: {error.reason}") from error
 
 
-def decode_csv_text(data: bytes) -> str:
-    for encoding in ("utf-8-sig", "utf-8", "cp1251"):
-        try:
-            return data.decode(encoding)
-        except UnicodeDecodeError:
-            continue
-    raise OzonApiError("Report CSV encoding is not supported")
-
-
-def detect_csv_layout(text: str) -> tuple[str, int]:
-    lines = text.splitlines()
-    candidates: list[tuple[int, str, int, str]] = []
-
-    for index, line in enumerate(lines[:50]):
-        counts = [(line.count(separator), separator) for separator in (";", ",", "\t")]
-        count, separator = max(counts, key=lambda item: item[0])
-        if count > 0:
-            candidates.append((count, separator, index, line))
-
-    if not candidates:
-        return ",", 0
-
-    max_count = max(count for count, _, _, _ in candidates)
-    best_candidates = [candidate for candidate in candidates if candidate[0] == max_count]
-
-    for _, separator, index, line in best_candidates:
-        if not line.lstrip().startswith(separator):
-            return separator, index
-
-    _, separator, index, _ = best_candidates[0]
-    return separator, index
-
-
-def csv_bytes_to_dataframe(data: bytes) -> pd.DataFrame:
-    text = decode_csv_text(data)
-    separator, header_row = detect_csv_layout(text)
-    dataframe = pd.read_csv(
-        io.StringIO(text),
-        sep=separator,
-        skiprows=header_row,
-        engine="python",
-    )
-    return dataframe.dropna(axis=1, how="all")
-
-
-def zip_bytes_to_dataframe(data: bytes) -> pd.DataFrame:
-    with zipfile.ZipFile(io.BytesIO(data)) as archive:
-        names = [name for name in archive.namelist() if not name.endswith("/")]
-        for name in names:
-            if name.lower().endswith((".csv", ".txt")):
-                return csv_bytes_to_dataframe(archive.read(name))
-        for name in names:
-            if name.lower().endswith((".xlsx", ".xlsm", ".xls")):
-                return pd.read_excel(io.BytesIO(archive.read(name)))
-
-    raise OzonApiError("Report archive does not contain CSV or Excel files")
-
-
 def report_content_to_dataframe(report: ReportContent) -> pd.DataFrame:
-    filename = report.filename.lower()
-    content_type = report.content_type.lower()
-
-    if filename.endswith((".xlsx", ".xlsm", ".xls")) or "excel" in content_type or "spreadsheet" in content_type:
-        return pd.read_excel(io.BytesIO(report.data))
-
-    if zipfile.is_zipfile(io.BytesIO(report.data)):
-        return zip_bytes_to_dataframe(report.data)
-
-    return csv_bytes_to_dataframe(report.data)
-
-
-def read_credentials() -> OzonCredentials:
-    client_id = os.getenv("OZON_PERFORMANCE_CLIENT_ID", "").strip()
-    client_secret = os.getenv("OZON_PERFORMANCE_CLIENT_SECRET", "").strip()
-
-    missing = []
-    if not client_id:
-        missing.append("OZON_PERFORMANCE_CLIENT_ID")
-    if not client_secret:
-        missing.append("OZON_PERFORMANCE_CLIENT_SECRET")
-
-    if missing:
-        names = ", ".join(missing)
-        raise OzonApiError(f"Set environment variables first: {names}")
-
-    return OzonCredentials(client_id=client_id, client_secret=client_secret)
+    try:
+        return pd.read_csv(io.BytesIO(report.data), sep=";", encoding="utf-8-sig")
+    except UnicodeDecodeError:
+        return pd.read_csv(io.BytesIO(report.data), sep=";", encoding="cp1251")
 
 
 class OzonUtmStatisticsClient:
@@ -281,10 +198,6 @@ class OzonUtmStatisticsClient:
         self.credentials = credentials
         self.base_url = base_url
         self._token: str | None = None
-
-    @classmethod
-    def from_env(cls, base_url: str = API_BASE_URL) -> "OzonUtmStatisticsClient":
-        return cls(read_credentials(), base_url=base_url)
 
     @property
     def token(self) -> str:
