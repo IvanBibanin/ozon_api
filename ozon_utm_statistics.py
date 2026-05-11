@@ -17,6 +17,15 @@ API_BASE_URL = "https://api-performance.ozon.ru"
 TOKEN_PATH = "/api/client/token"
 REPORT_PATH = "/api/client/vendors/statistics"
 REPORT_TYPE = "TRAFFIC_SOURCES"
+COLUMN_NAME_REPLACEMENTS = {
+    "Средняя длительность сессии чч:мм:сс": "Средняя длительность сессии",
+    "Заказано товаров в рамках сессии (шт.)": "Заказано товаров сессии шт",
+    "Суммарная стоимость товаров, заказанных в рамках сессии (руб.)": "Стоимость товаров сессии руб",
+    "Суммарная цена товаров, заказанных в рамках сессии (руб.)": "Цена товаров сессии руб",
+    "Заказано товаров в рамках окна атрибуции (шт.)": "Заказано товаров атрибуция шт",
+    "Суммарная стоимость товаров, заказанных в рамках окна атрибуции (руб.)": "Стоимость товаров атрибуция руб",
+    "Суммарная цена товаров, заказанных в рамках окна атрибуции (руб.)": "Цена товаров атрибуция руб",
+}
 
 
 class OzonApiError(RuntimeError):
@@ -157,10 +166,34 @@ class OzonUtmStatisticsClient:
         except urllib.error.URLError as error:
             raise OzonApiError(f"Report fetch failed: {error.reason}") from error
 
+    def _clean_dataframe_columns(self, dataframe: pd.DataFrame) -> pd.DataFrame:
+        dataframe = dataframe.copy()
+        columns = []
+        used_columns = set()
+
+        for column in dataframe.columns.tolist():
+            column_name = " ".join(str(column).split())
+            column_name = COLUMN_NAME_REPLACEMENTS.get(column_name, column_name)
+            if not column_name:
+                column_name = "column"
+
+            new_column_name = column_name
+            index = 2
+            while new_column_name in used_columns:
+                new_column_name = f"{column_name}_{index}"
+                index += 1
+
+            used_columns.add(new_column_name)
+            columns.append(new_column_name)
+
+        dataframe.columns = columns
+        return dataframe
+
     def _report_content_to_dataframe(self, report: bytes) -> pd.DataFrame:
         if report.startswith(b"PK"):
             try:
-                return pd.read_excel(io.BytesIO(report))
+                dataframe = pd.read_excel(io.BytesIO(report))
+                return self._clean_dataframe_columns(dataframe)
             except Exception:
                 with zipfile.ZipFile(io.BytesIO(report)) as archive:
                     names = [name for name in archive.namelist() if not name.endswith("/")]
@@ -168,17 +201,20 @@ class OzonUtmStatisticsClient:
                         if name.lower().endswith((".csv", ".txt")):
                             data = archive.read(name)
                             try:
-                                return pd.read_csv(io.BytesIO(data), sep=";", encoding="utf-8-sig")
+                                dataframe = pd.read_csv(io.BytesIO(data), sep=";", encoding="utf-8-sig")
                             except UnicodeDecodeError:
-                                return pd.read_csv(io.BytesIO(data), sep=";", encoding="cp1251")
+                                dataframe = pd.read_csv(io.BytesIO(data), sep=";", encoding="cp1251")
+                            return self._clean_dataframe_columns(dataframe)
                     for name in names:
                         if name.lower().endswith((".xlsx", ".xlsm", ".xls")):
-                            return pd.read_excel(io.BytesIO(archive.read(name)))
+                            dataframe = pd.read_excel(io.BytesIO(archive.read(name)))
+                            return self._clean_dataframe_columns(dataframe)
 
         try:
-            return pd.read_csv(io.BytesIO(report), sep=";", encoding="utf-8-sig")
+            dataframe = pd.read_csv(io.BytesIO(report), sep=";", encoding="utf-8-sig")
         except UnicodeDecodeError:
-            return pd.read_csv(io.BytesIO(report), sep=";", encoding="cp1251")
+            dataframe = pd.read_csv(io.BytesIO(report), sep=";", encoding="cp1251")
+        return self._clean_dataframe_columns(dataframe)
 
     def get_utm_statistics(
         self,
