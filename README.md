@@ -8,16 +8,16 @@
 
 ### В Jupyter Notebook
 
-Сначала установите проект из папки репозитория:
+Установите проект из GitHub:
+
+```python
+%pip install --force-reinstall --no-cache-dir git+https://github.com/IvanBibanin/ozon_api.git@main
+```
+
+Если запускаете ноутбук из локальной папки репозитория:
 
 ```python
 %pip install -e .
-```
-
-Если пакет уже был установлен раньше, обновите его принудительно:
-
-```python
-%pip install --force-reinstall --no-cache-dir git+https://github.com/IvanBibanin/ozon_api.git
 ```
 
 В следующей ячейке укажите ключи и получите отчёт как датафрейм:

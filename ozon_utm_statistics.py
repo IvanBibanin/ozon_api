@@ -32,14 +32,6 @@ class OzonCredentials:
     client_secret: str
 
 
-@dataclass(frozen=True)
-class ReportContent:
-    data: bytes
-    content_type: str
-    filename: str
-    url: str
-
-
 def request_json(
     method: str,
     url: str,
@@ -143,21 +135,7 @@ def wait_report(
         time.sleep(poll_interval)
 
 
-def extract_filename(response: urllib.response.addinfourl, url: str) -> str:
-    disposition = response.headers.get("Content-Disposition", "")
-    for chunk in disposition.split(";"):
-        key, _, value = chunk.strip().partition("=")
-        key = key.lower()
-        if key == "filename*":
-            _, _, encoded_filename = value.strip("\"'").partition("''")
-            return urllib.parse.unquote(encoded_filename or value)
-        if key == "filename":
-            return value.strip("\"'")
-
-    return urllib.parse.urlparse(url).path.rsplit("/", 1)[-1]
-
-
-def fetch_report_content(token: str, base_url: str, link: str, timeout: int = 120) -> ReportContent:
+def fetch_report_content(token: str, base_url: str, link: str, timeout: int = 120) -> bytes:
     url = urllib.parse.urljoin(f"{base_url}/", link)
     url_host = urllib.parse.urlparse(url).netloc
     api_host = urllib.parse.urlparse(base_url).netloc
@@ -173,12 +151,7 @@ def fetch_report_content(token: str, base_url: str, link: str, timeout: int = 12
 
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            return ReportContent(
-                data=response.read(),
-                content_type=response.headers.get("Content-Type", ""),
-                filename=extract_filename(response, url),
-                url=url,
-            )
+            return response.read()
     except urllib.error.HTTPError as error:
         details = error.read().decode("utf-8", errors="replace")
         raise OzonApiError(f"Report fetch failed: HTTP {error.code}: {details}") from error
@@ -186,11 +159,11 @@ def fetch_report_content(token: str, base_url: str, link: str, timeout: int = 12
         raise OzonApiError(f"Report fetch failed: {error.reason}") from error
 
 
-def report_content_to_dataframe(report: ReportContent) -> pd.DataFrame:
+def report_content_to_dataframe(report: bytes) -> pd.DataFrame:
     try:
-        return pd.read_csv(io.BytesIO(report.data), sep=";", encoding="utf-8-sig")
+        return pd.read_csv(io.BytesIO(report), sep=";", encoding="utf-8-sig")
     except UnicodeDecodeError:
-        return pd.read_csv(io.BytesIO(report.data), sep=";", encoding="cp1251")
+        return pd.read_csv(io.BytesIO(report), sep=";", encoding="cp1251")
 
 
 class OzonUtmStatisticsClient:
@@ -226,7 +199,7 @@ class OzonUtmStatisticsClient:
             timeout_seconds=timeout_seconds,
         )
 
-    def fetch_report_content(self, link: str) -> ReportContent:
+    def fetch_report_content(self, link: str) -> bytes:
         return fetch_report_content(self.token, self.base_url, link)
 
     def get_utm_statistics(
