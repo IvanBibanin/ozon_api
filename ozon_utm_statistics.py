@@ -3,11 +3,9 @@
 
 from __future__ import annotations
 
-import argparse
 import io
 import json
 import os
-import sys
 import time
 import urllib.error
 import urllib.parse
@@ -144,7 +142,6 @@ def wait_report(
         if time.monotonic() >= deadline:
             raise TimeoutError(f"Report {uuid} was not ready after {timeout_seconds} seconds")
 
-        print(f"Report {uuid}: state={state or 'UNKNOWN'}, waiting {poll_interval}s...", file=sys.stderr)
         time.sleep(poll_interval)
 
 
@@ -345,21 +342,13 @@ class OzonUtmStatisticsClient:
 
 class to_postgresql():
     def __init__(self, port=None, host=None, user=None, password=None, database=None, schema=None):
-        self.schema = schema
-        self.engine = sqlalchemy.create_engine(
-            f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}",
-            pool_pre_ping=True,
-            pool_recycle=1800,
-            connect_args={"connect_timeout": 30},
-            executemany_mode="values_plus_batch",
-            executemany_batch_page_size=500,
-        )
+        self.schema=schema
+        self.engine = sqlalchemy.create_engine(f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}",
+                pool_pre_ping=True,pool_recycle=1800,connect_args={"connect_timeout": 30},
+                executemany_mode="values_plus_batch",executemany_batch_page_size=500)
 
     def create_table(self, table_name=None, data=None):
-        column_name = ', '.join(
-            f'"{d}" DATE' if d == 'date' or d == 'Дата' else f'"{d}" TEXT'
-            for d in data.columns.tolist()
-        )
+        column_name = ', '.join(f'"{d}" DATE' if d == 'date' or d == 'Дата' else f'"{d}" TEXT' for d in data.columns.tolist())
 
         with self.engine.begin() as connection:
             connection.execute(
@@ -371,12 +360,12 @@ class to_postgresql():
                 )
             )
 
+    def sql_query(self, query=None):
+        with self.engine.begin() as connection:
+            connection.execute(sqlalchemy.text(query))
+
     def insert_into_table(self, table_name=None, data=None):
         data = data.copy()
-        data['date'] = pd.to_datetime(data['date']).dt.date
-        min_date = data['date'].min()
-        max_date = data['date'].max()
-
         columns_sql = ", ".join(f'"{c}"' for c in data.columns.tolist())
         placeholders_sql = ", ".join(f":{c}" for c in data.columns.tolist())
 
@@ -384,63 +373,7 @@ class to_postgresql():
             f'INSERT INTO {self.schema}."{table_name}" ({columns_sql}) VALUES ({placeholders_sql})'
         )
 
-        delete_sql = sqlalchemy.text(
-            f'DELETE FROM {self.schema}."{table_name}" WHERE "Дата" BETWEEN :min_date AND :max_date'
-        )
-
         rows = data.to_dict(orient="records")
 
         with self.engine.begin() as connection:
-            connection.execute(delete_sql, {
-                "min_date": min_date,
-                "max_date": max_date
-            })
             connection.execute(insert_sql, rows)
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Generate Ozon UTM/external traffic analytics report and print it as a DataFrame.",
-    )
-    parser.add_argument("--date-from", required=True, help="Start date in YYYY-MM-DD format")
-    parser.add_argument("--date-to", required=True, help="End date in YYYY-MM-DD format")
-    parser.add_argument(
-        "--uuid",
-        help="Existing report UUID. If passed, the script skips report creation.",
-    )
-    parser.add_argument("--base-url", default=API_BASE_URL, help=f"API base URL. Default: {API_BASE_URL}")
-    parser.add_argument("--poll-interval", default=10, type=int, help="Polling interval in seconds")
-    parser.add_argument("--timeout", default=1800, type=int, help="Report generation timeout in seconds")
-    parser.add_argument("--csv", action="store_true", help="Print full DataFrame as CSV instead of table preview")
-    return parser
-
-
-def main() -> int:
-    args = build_parser().parse_args()
-    credentials = read_credentials()
-
-    client = OzonUtmStatisticsClient(credentials, base_url=args.base_url)
-    uuid = args.uuid or client.submit_report(args.date_from, args.date_to)
-    print(f"Report UUID: {uuid}", file=sys.stderr)
-
-    dataframe = client.get_utm_statistics(
-        args.date_from,
-        args.date_to,
-        uuid=uuid,
-        poll_interval=args.poll_interval,
-        timeout_seconds=args.timeout,
-    )
-
-    if args.csv:
-        print(dataframe.to_csv(index=False))
-    else:
-        print(dataframe)
-    return 0
-
-
-if __name__ == "__main__":
-    try:
-        raise SystemExit(main())
-    except (OzonApiError, TimeoutError) as error:
-        print(f"Error: {error}", file=sys.stderr)
-        raise SystemExit(1)

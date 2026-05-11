@@ -4,15 +4,6 @@
 `TRAFFIC_SOURCES`, ждёт готовности отчёта и преобразует результат в
 `pandas.DataFrame`.
 
-## Подготовка
-
-Нужны `Client ID` и `Client Secret` именно от `Performance API`.
-
-```bash
-export OZON_PERFORMANCE_CLIENT_ID="..."
-export OZON_PERFORMANCE_CLIENT_SECRET="..."
-```
-
 ## Запуск
 
 ### В Jupyter Notebook
@@ -62,8 +53,8 @@ df
 
 ### Загрузка в PostgreSQL
 
-В датафрейме должна быть колонка `date`: по ней класс определяет период отчёта.
-В таблице PostgreSQL период для замены проверяется по колонке `"Дата"`.
+Если перед вставкой нужно удалить старые строки, выполните свой SQL через
+`sql_query()`, а затем вставьте датафрейм.
 
 ```python
 from ozon_utm_statistics import to_postgresql
@@ -78,33 +69,12 @@ postgres = to_postgresql(
 )
 
 postgres.create_table(table_name="utm_statistics", data=df)
-rows_inserted = postgres.insert_into_table(table_name="utm_statistics", data=df)
+postgres.sql_query("""
+DELETE FROM ozon."utm_statistics"
+WHERE "Дата" BETWEEN '2026-05-01' AND '2026-05-10'
+""")
 
-rows_inserted
-```
-
-### Из консоли
-
-```bash
-python3 ozon_utm_statistics.py --date-from 2026-05-01 --date-to 2026-05-10
-```
-
-Можно установить проект как локальную CLI-команду:
-
-```bash
-python3 -m pip install -e .
-ozon-utm-statistics --date-from 2026-05-01 --date-to 2026-05-10
-```
-
-Для вывода полной таблицы в CSV-формате в консоль добавьте `--csv`.
-
-Если отчёт уже создан и есть UUID:
-
-```bash
-python3 ozon_utm_statistics.py \
-  --date-from 2026-05-01 \
-  --date-to 2026-05-10 \
-  --uuid "0c159c60-ab92-46d9-9a6b-d225dbf5c7b1"
+postgres.insert_into_table(table_name="utm_statistics", data=df)
 ```
 
 Ozon ограничивает период отчёта внешнего трафика тремя месяцами.

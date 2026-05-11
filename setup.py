@@ -9,7 +9,7 @@ README = ROOT / "README.md"
 
 setup(
     name="ozon-api",
-    version="0.3.0",
+    version="0.4.0",
     description="Load Ozon Performance API UTM and external traffic statistics into pandas.",
     long_description=README.read_text(encoding="utf-8"),
     long_description_content_type="text/markdown",
@@ -21,9 +21,4 @@ setup(
         "psycopg2-binary>=2.9",
         "SQLAlchemy>=2.0",
     ],
-    entry_points={
-        "console_scripts": [
-            "ozon-utm-statistics=ozon_utm_statistics:main",
-        ],
-    },
 )
