@@ -266,14 +266,20 @@ class to_postgresql():
 
     def insert_into_table(self, table_name=None, data=None):
         data = data.copy()
-        columns_sql = ", ".join(f'"{c}"' for c in data.columns.tolist())
-        placeholders_sql = ", ".join(f":{c}" for c in data.columns.tolist())
+        data = data.where(pd.notna(data), None)
+        columns = data.columns.tolist()
+        placeholders = [f"column_{index}" for index in range(len(columns))]
+        columns_sql = ", ".join(f'"{c}"' for c in columns)
+        placeholders_sql = ", ".join(f":{c}" for c in placeholders)
 
         insert_sql = sqlalchemy.text(
             f'INSERT INTO {self.schema}."{table_name}" ({columns_sql}) VALUES ({placeholders_sql})'
         )
 
-        rows = data.to_dict(orient="records")
+        rows = [
+            {placeholder: row[column] for placeholder, column in zip(placeholders, columns)}
+            for row in data.to_dict(orient="records")
+        ]
 
         with self.engine.begin() as connection:
             connection.execute(insert_sql, rows)
