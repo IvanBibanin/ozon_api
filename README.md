@@ -11,8 +11,11 @@
 Установите проект из GitHub:
 
 ```python
-%pip install --force-reinstall --no-cache-dir git+https://github.com/IvanBibanin/ozon_api.git@main
+%pip uninstall -y ozon-api
+%pip install --upgrade --force-reinstall --no-cache-dir git+https://github.com/IvanBibanin/ozon_api.git@main
 ```
+
+После установки перезапустите kernel в Jupyter Notebook.
 
 Если запускаете ноутбук из локальной папки репозитория:
 
