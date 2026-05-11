@@ -6,6 +6,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
 from typing import Any
 
 import pandas as pd
@@ -157,6 +158,23 @@ class OzonUtmStatisticsClient:
             raise OzonApiError(f"Report fetch failed: {error.reason}") from error
 
     def _report_content_to_dataframe(self, report: bytes) -> pd.DataFrame:
+        if report.startswith(b"PK"):
+            try:
+                return pd.read_excel(io.BytesIO(report))
+            except Exception:
+                with zipfile.ZipFile(io.BytesIO(report)) as archive:
+                    names = [name for name in archive.namelist() if not name.endswith("/")]
+                    for name in names:
+                        if name.lower().endswith((".csv", ".txt")):
+                            data = archive.read(name)
+                            try:
+                                return pd.read_csv(io.BytesIO(data), sep=";", encoding="utf-8-sig")
+                            except UnicodeDecodeError:
+                                return pd.read_csv(io.BytesIO(data), sep=";", encoding="cp1251")
+                    for name in names:
+                        if name.lower().endswith((".xlsx", ".xlsm", ".xls")):
+                            return pd.read_excel(io.BytesIO(archive.read(name)))
+
         try:
             return pd.read_csv(io.BytesIO(report), sep=";", encoding="utf-8-sig")
         except UnicodeDecodeError:
