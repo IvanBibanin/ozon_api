@@ -442,5 +442,5 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except (OzonApiError, TimeoutError) as error:
-        print(f"Error: {error}", file=sys.stderr)
-        raise SystemExit(1)
+        
+
