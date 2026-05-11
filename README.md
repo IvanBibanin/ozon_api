@@ -60,6 +60,29 @@ df = client.get_utm_statistics(
 df
 ```
 
+### Загрузка в PostgreSQL
+
+В датафрейме должна быть колонка `date`: по ней класс определяет период отчёта.
+В таблице PostgreSQL период для замены проверяется по колонке `"Дата"`.
+
+```python
+from ozon_utm_statistics import to_postgresql
+
+postgres = to_postgresql(
+    host="localhost",
+    port=5432,
+    user="postgres",
+    password="password",
+    database="database",
+    schema="ozon",
+)
+
+postgres.create_table(table_name="utm_statistics", data=df)
+rows_inserted = postgres.insert_into_table(table_name="utm_statistics", data=df)
+
+rows_inserted
+```
+
 ### Из консоли
 
 ```bash
