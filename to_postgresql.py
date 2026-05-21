@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 import pandas as pd
 import sqlalchemy
 
@@ -119,3 +117,6 @@ class ToPostgreSQL:
 
         print(f"Inserted rows: {len(rows)} into {self.schema}.{table_name}")
         return True
+
+
+to_postgresql = ToPostgreSQL
