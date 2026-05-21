@@ -9,15 +9,15 @@ README = ROOT / "README.md"
 
 setup(
     name="ozon-api",
-    version="0.6.4",
+    version="0.6.5",
     description="Load Ozon Performance API UTM and external traffic statistics into pandas.",
     long_description=README.read_text(encoding="utf-8"),
     long_description_content_type="text/markdown",
-    py_modules=["ozon_utm_statistics"],
+    py_modules=["ozon_utm_statistics", "to_postgresql"],
     python_requires=">=3.10",
     install_requires=[
         "openpyxl>=3.1",
-        "pandas>=2.2",
+        "pandas>=2.2,<3",
         "psycopg2-binary>=2.9",
         "SQLAlchemy>=2.0",
     ],
