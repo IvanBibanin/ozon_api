@@ -9,7 +9,7 @@ README = ROOT / "README.md"
 
 setup(
     name="ozon-api",
-    version="0.6.5",
+    version="0.6.6",
     description="Load Ozon Performance API UTM and external traffic statistics into pandas.",
     long_description=README.read_text(encoding="utf-8"),
     long_description_content_type="text/markdown",

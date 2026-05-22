@@ -126,7 +126,6 @@ postgres = ToPostgreSQL(
     user="your-user",
     password="your-password",
     database="postgres",
-    schema="overon",
 )
 ```
 
@@ -141,14 +140,13 @@ postgres = to_postgresql(
     user="your-user",
     password="your-password",
     database="postgres",
-    schema="overon",
 )
 ```
 
 ## Создать таблицу
 
 ```python
-postgres.create_table(data=df, table_name="МИШИДО")
+postgres.create_table(data=df, table_name="МИШИДО", schema="overon")
 ```
 
 Метод создает схему, если ее нет, и таблицу, если ее нет:
@@ -173,7 +171,7 @@ postgres.sql_query(
     f"WHERE \"Дата\" BETWEEN DATE '{date_from}' AND DATE '{date_to}'"
 )
 
-postgres.insert_into_table(data=df, table_name="МИШИДО")
+postgres.insert_into_table(data=df, table_name="МИШИДО", schema="overon")
 ```
 
 Можно написать без f-string:
@@ -208,20 +206,19 @@ df = client.get_utm_statistics(
 ozon_to_pg = to_postgresql(
     port=6543,
     host="your-postgres-host",
-    schema="overon",
     user="your-user",
     password="your-password",
     database="postgres",
 )
 
-ozon_to_pg.create_table(data=df, table_name="МИШИДО")
+ozon_to_pg.create_table(data=df, table_name="МИШИДО", schema="overon")
 
 ozon_to_pg.sql_query(
     f'DELETE FROM "overon"."МИШИДО" '
     f"WHERE \"Дата\" BETWEEN DATE '{date_from}' AND DATE '{date_to}'"
 )
 
-ozon_to_pg.insert_into_table(data=df, table_name="МИШИДО")
+ozon_to_pg.insert_into_table(data=df, table_name="МИШИДО", schema="overon")
 ```
 
 ## Частая ошибка с датами в SQL
