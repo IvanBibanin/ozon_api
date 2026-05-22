@@ -9,13 +9,14 @@ Python-пакет для работы с отчетом Ozon Performance API п�
 - ждать готовности отчета;
 - скачивать отчет и преобразовывать его в `pandas.DataFrame`;
 - очищать длинные названия колонок;
-- сохранять данные в PostgreSQL через отдельный модуль `to_postgresql.py`.
+- сохранять данные в PostgreSQL через отдельный пакет `to_postgresql`.
 
 ## Установка в Jupyter Notebook
 
 ```python
 %pip uninstall -y ozon-api
 %pip install --upgrade --force-reinstall --no-cache-dir git+https://github.com/IvanBibanin/ozon_api.git@main
+%pip install --upgrade --force-reinstall --no-cache-dir git+https://github.com/IvanBibanin/to_postgresql.git@main
 ```
 
 После установки перезапустите kernel Jupyter, чтобы Python точно взял свежую версию модулей.
@@ -115,7 +116,7 @@ df.to_excel("/Users/ivan/Downloads/ozon_utm_statistics.xlsx", index=False)
 
 ## Подключение к PostgreSQL
 
-PostgreSQL-класс вынесен в отдельный файл `to_postgresql.py`.
+PostgreSQL-helper вынесен в отдельный пакет `to_postgresql`. Установите его отдельно из `https://github.com/IvanBibanin/to_postgresql`.
 
 ```python
 from to_postgresql import ToPostgreSQL
@@ -281,7 +282,6 @@ postgres.sql_query(
 
 ```text
 ozon_utm_statistics.py  # Ozon Performance API client и преобразование отчета в DataFrame
-to_postgresql.py        # отдельный PostgreSQL helper
 setup.py                # установка пакета из GitHub
 README.md               # документация и примеры
 ```
